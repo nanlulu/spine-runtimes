@@ -1,4 +1,6 @@
 var skinsDemo = function (canvas, bgColor) {
+	var HIGHLIGHT_COLOR = new spine.Color(1, 0, 0, 1);
+
 	var canvas, gl, renderer, input, assetManager;
 	var skeleton, state, offset, bounds;
 	var timeKeeper;
@@ -193,7 +195,53 @@ var skinsDemo = function (canvas, bgColor) {
 		var width = bounds.x * 1.25;
 		var scale = width / texture.getImage().width;
 		var height = scale * texture.getImage().height;
-		renderer.drawTexture(texture, offset.x + bounds.x + 190, offset.y + bounds.y / 2 - height / 2 - 5, width, height);
+		var texX = offset.x + bounds.x + 190;
+		var texY = offset.y + bounds.y / 2 - height / 2 - 5;
+		var imgWidth = texture.getImage().width;
+		var imgHeight = texture.getImage().height;
+
+		// Draw the full texture sheet dimmed
+		var DIM_COLOR = new spine.Color(0.3, 0.3, 0.3, 1);
+		renderer.drawTexture(texture, texX, texY, width, height, DIM_COLOR);
+
+		// Collect active regions
+		var activeRegions = [];
+		var seen = {};
+		for (var i = 0; i < skeleton.drawOrder.length; i++) {
+			var slot = skeleton.drawOrder[i];
+			var attachment = slot.getAttachment();
+			if (!attachment || !attachment.region) continue;
+			var region = attachment.region;
+			var key = region.u + "," + region.v + "," + region.u2 + "," + region.v2;
+			if (seen[key]) continue;
+			seen[key] = true;
+			activeRegions.push(region);
+		}
+
+		// Re-draw active regions at full brightness on top of the dimmed sheet
+		for (var i = 0; i < activeRegions.length; i++) {
+			var region = activeRegions[i];
+			var rx = texX + region.u * imgWidth * scale;
+			var ry = texY + (1 - region.v2) * imgHeight * scale;
+			var rw = (region.u2 - region.u) * imgWidth * scale;
+			var rh = (region.v2 - region.v) * imgHeight * scale;
+			renderer.drawRegion(region, rx, ry, rw, rh);
+		}
+
+		// Draw red outlines around active regions
+		for (var i = 0; i < activeRegions.length; i++) {
+			var region = activeRegions[i];
+			var rx = texX + region.u * imgWidth * scale;
+			var ry = texY + (1 - region.v2) * imgHeight * scale;
+			var rw = (region.u2 - region.u) * imgWidth * scale;
+			var rh = (region.v2 - region.v) * imgHeight * scale;
+			var lw = 2;
+			renderer.rectLine(true, rx, ry, rx + rw, ry, lw, HIGHLIGHT_COLOR);
+			renderer.rectLine(true, rx + rw, ry, rx + rw, ry + rh, lw, HIGHLIGHT_COLOR);
+			renderer.rectLine(true, rx + rw, ry + rh, rx, ry + rh, lw, HIGHLIGHT_COLOR);
+			renderer.rectLine(true, rx, ry + rh, rx, ry, lw, HIGHLIGHT_COLOR);
+		}
+
 		renderer.end();
 	}
 
