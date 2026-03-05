@@ -247,11 +247,19 @@ def next_power_of_2(n: int) -> int:
     return 1 << (n - 1).bit_length()
 
 
+def _phys_dims(r: AtlasRegion) -> tuple[int, int]:
+    """Return (physical_width, physical_height) in the atlas image."""
+    if r.rotate == 90:
+        return r.height, r.width
+    return r.width, r.height
+
+
 def shelf_pack(regions: dict[str, AtlasRegion], padding: int = 2) -> tuple[list[PackedRegion], int, int]:
     """Pack regions into a texture using shelf packing. Returns packed list and dimensions."""
-    items = sorted(regions.items(), key=lambda kv: kv[1].height, reverse=True)
+    # Sort and pack by physical dimensions (rotated regions have w/h swapped)
+    items = sorted(regions.items(), key=lambda kv: _phys_dims(kv[1])[1], reverse=True)
 
-    total_area = sum(r.width * r.height for _, r in items)
+    total_area = sum(_phys_dims(r)[0] * _phys_dims(r)[1] for _, r in items)
     est_side = int(math.ceil(math.sqrt(total_area)))
     canvas_w = next_power_of_2(est_side)
 
@@ -261,8 +269,9 @@ def shelf_pack(regions: dict[str, AtlasRegion], padding: int = 2) -> tuple[list[
     shelf_h = 0
 
     for name, region in items:
-        w = region.width + padding
-        h = region.height + padding
+        pw, ph = _phys_dims(region)
+        w = pw + padding
+        h = ph + padding
 
         if shelf_x + w > canvas_w:
             shelf_y += shelf_h
@@ -301,7 +310,8 @@ def repack_png(
 
     for pr in packed_regions:
         r = pr.region
-        crop = source.crop((r.x, r.y, r.x + r.width, r.y + r.height))
+        pw, ph = _phys_dims(r)
+        crop = source.crop((r.x, r.y, r.x + pw, r.y + ph))
         canvas.paste(crop, (pr.x, pr.y))
 
     canvas.save(output_path)
@@ -399,11 +409,12 @@ def verify_output(output_dir: str, skin_name_lower: str, skeleton_json: dict):
             f"{page.width}x{page.height}"
         )
 
-    # Check all region bounds fit within PNG
+    # Check all region bounds fit within PNG (use physical dimensions)
     for name, region in atlas_regions.items():
-        if region.x + region.width > page.width:
+        pw, ph = _phys_dims(region)
+        if region.x + pw > page.width:
             errors.append(f"Region '{name}' exceeds page width")
-        if region.y + region.height > page.height:
+        if region.y + ph > page.height:
             errors.append(f"Region '{name}' exceeds page height")
 
     return errors

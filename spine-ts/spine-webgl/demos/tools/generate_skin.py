@@ -365,12 +365,8 @@ def postprocess(
     region: AtlasRegion,
 ) -> Image.Image:
     """Resize, rotate, and apply PMA to fit an image into an atlas region."""
-    # Target size is the logical (un-rotated) dimensions
-    target_w = region.logical_width
-    target_h = region.logical_height
-
-    # Resize to logical dimensions using Lanczos
-    img = img.resize((target_w, target_h), Image.LANCZOS)
+    # Resize to original (pre-rotation) dimensions, then rotate for atlas packing
+    img = img.resize((region.width, region.height), Image.LANCZOS)
 
     # Rotate 90 CW if the atlas region is stored rotated
     if region.rotate == 90:
@@ -409,8 +405,11 @@ def composite(
     atlas = Image.open(atlas_png_path).convert("RGBA")
 
     for region, img in regions_with_images:
+        # Physical dims are swapped for rotated regions
+        phys_w = region.height if region.rotate == 90 else region.width
+        phys_h = region.width if region.rotate == 90 else region.height
         # Clear the region rectangle
-        clear = Image.new("RGBA", (region.width, region.height), (0, 0, 0, 0))
+        clear = Image.new("RGBA", (phys_w, phys_h), (0, 0, 0, 0))
         atlas.paste(clear, (region.x, region.y))
         # Paste the new image
         atlas.paste(img, (region.x, region.y))
@@ -433,16 +432,19 @@ def extract_regions(
     os.makedirs(output_dir, exist_ok=True)
 
     for part_key, region in skin_regions.items():
+        # Physical dims are swapped for rotated regions
+        phys_w = region.height if region.rotate == 90 else region.width
+        phys_h = region.width if region.rotate == 90 else region.height
         crop = atlas.crop((
             region.x,
             region.y,
-            region.x + region.width,
-            region.y + region.height,
+            region.x + phys_w,
+            region.y + phys_h,
         ))
         safe_name = part_key.replace("/", "_")
         out_path = os.path.join(output_dir, f"{safe_name}.png")
         crop.save(out_path)
-        print(f"  Extracted {part_key} ({region.width}x{region.height}) -> {out_path}")
+        print(f"  Extracted {part_key} ({phys_w}x{phys_h}) -> {out_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -506,8 +508,10 @@ def generate_skin(
         full_prompt = f"2D game sprite, {part_prompt}, white background, centered"
 
         print(f"\n  Generating: {part_key} ({part_category})")
-        print(f"    Region: {region.logical_width}x{region.logical_height} "
-              f"(stored: {region.width}x{region.height}, rotate={region.rotate})")
+        phys_w = region.height if region.rotate == 90 else region.width
+        phys_h = region.width if region.rotate == 90 else region.height
+        print(f"    Region: {region.width}x{region.height} original"
+              f" ({phys_w}x{phys_h} physical, rotate={region.rotate})")
 
         # Create generator
         if backend == "placeholder":
@@ -517,11 +521,11 @@ def generate_skin(
         else:
             raise ValueError(f"Unknown backend: {backend}")
 
-        # Generate
+        # Generate at original (pre-rotation) dimensions
         raw_img = generator.generate(
             full_prompt,
-            region.logical_width,
-            region.logical_height,
+            region.width,
+            region.height,
             seed,
         )
 
