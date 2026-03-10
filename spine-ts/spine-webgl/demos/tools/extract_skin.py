@@ -194,7 +194,33 @@ def extract_skeleton_json(
             result[key] = heroes[key]
     result["skins"] = kept_skins
 
+    # Inject A-pose animation
+    result["animations"]["a-pose"] = _make_a_pose_animation()
+
     return result
+
+
+def _make_a_pose_animation() -> dict:
+    """Create an A-pose animation: arms at ~30 deg below horizontal, legs slightly spread, all straight."""
+    # Rotation values are deltas relative to the bone's setup pose rotation.
+    # Arms: straighten lower arms/hands, position upper arms at ~30 deg below horizontal.
+    # Legs: straighten and spread slightly, feet flat.
+    return {
+        "bones": {
+            "arm_upper_far":  {"rotate": [{"value": 44.17}]},
+            "arm_lower_far":  {"rotate": [{"value": -97.62}]},
+            "hand_far":       {"rotate": [{"value": 0.90}]},
+            "arm_upper_near": {"rotate": [{"value": -1.63}]},
+            "arm_lower_near": {"rotate": [{"value": -90.73}]},
+            "hand_near":      {"rotate": [{"value": -1.35}]},
+            "leg_upper_far":  {"rotate": [{"value": -21.99}]},
+            "leg_lower_far":  {"rotate": [{"value": 38.21}]},
+            "foot_far":       {"rotate": [{"value": 9.18}]},
+            "leg_upper_near": {"rotate": [{"value": 2.86}]},
+            "leg_lower_near": {"rotate": [{"value": 3.60}]},
+            "foot_near":      {"rotate": [{"value": 14.12}]},
+        }
+    }
 
 
 # ---------------------------------------------------------------------------
