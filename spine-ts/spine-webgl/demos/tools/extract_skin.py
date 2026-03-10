@@ -14,6 +14,7 @@ import argparse
 import json
 import math
 import os
+import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -424,11 +425,21 @@ def verify_output(output_dir: str, skin_name_lower: str, skeleton_json: dict):
 # Viewer HTML generator
 # ---------------------------------------------------------------------------
 
-def generate_viewer_html(output_dir: str, skin_name: str, skin_name_lower: str):
+def generate_viewer_html(output_dir: str, skin_name: str, skin_name_lower: str, skeleton_json: dict):
     """Generate a standalone viewer.html for the extracted skin."""
     script_dir = Path(__file__).resolve().parent
     dist_js = (script_dir / ".." / ".." / "dist" / "iife" / "spine-webgl.js").resolve()
-    spine_js_path = os.path.relpath(dist_js, os.path.abspath(output_dir))
+    shutil.copy2(str(dist_js), os.path.join(output_dir, "spine-webgl.js"))
+
+    # Extract animation names from skeleton JSON
+    animations = list(skeleton_json.get("animations", {}).keys())
+    default_anim = "idle" if "idle" in animations else (animations[0] if animations else "")
+
+    # Build option tags for the dropdown
+    options_html = ""
+    for anim in animations:
+        selected = ' selected' if anim == default_anim else ''
+        options_html += f'<option value="{anim}"{selected}>{anim}</option>\n'
 
     html = f"""<!DOCTYPE html>
 <html>
@@ -447,34 +458,51 @@ body {{
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }}
 canvas {{
+    width: 640px;
+    height: 480px;
     border: 1px solid #ccc;
 }}
-button {{
+.controls {{
     margin-top: 12px;
-    padding: 8px 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}}
+select, label {{
     font-size: 14px;
-    cursor: pointer;
+}}
+select {{
+    padding: 6px 10px;
     border: 1px solid #999;
     border-radius: 4px;
     background: #fff;
+    cursor: pointer;
 }}
-button:hover {{
-    background: #f0f0f0;
+label {{
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
 }}
 </style>
-<script src="{spine_js_path}"></script>
+<script src="spine-webgl.js"></script>
 </head>
 <body>
 
 <canvas id="canvas" width="640" height="480"></canvas>
-<button id="swing-sword">Swing Sword</button>
+<div class="controls">
+    <select id="animation-select">
+{options_html}    </select>
+    <label><input type="checkbox" id="loop-checkbox" checked> Loop</label>
+</div>
 
 <script>
 (function () {{
     var canvas = document.getElementById("canvas");
+    var animSelect = document.getElementById("animation-select");
+    var loopCheckbox = document.getElementById("loop-checkbox");
     var gl, renderer, assetManager, skeleton, state;
     var timeKeeper = new spine.TimeKeeper();
-    var clickAnim = 0;
     var bgColor = new spine.Color(235 / 255, 239 / 255, 244 / 255, 1);
     var offset = new spine.Vector2();
     var bounds = new spine.Vector2();
@@ -488,70 +516,37 @@ button:hover {{
 
     var loaded = false;
 
+    function updateBounds() {{
+        skeleton.setToSetupPose();
+        skeleton.updateWorldTransform(spine.Physics.update);
+        skeleton.getBounds(offset, bounds, []);
+    }}
+
+    function playSelected() {{
+        if (!state) return;
+        var animName = animSelect.value;
+        var loop = loopCheckbox.checked;
+        state.setAnimation(0, animName, loop);
+    }}
+
     function loadingComplete() {{
         var atlasLoader = new spine.AtlasAttachmentLoader(assetManager.get("{skin_name_lower}.atlas"));
         var skeletonJson = new spine.SkeletonJson(atlasLoader);
         var skeletonData = skeletonJson.readSkeletonData(assetManager.get("{skin_name_lower}.json"));
         skeleton = new spine.Skeleton(skeletonData);
         skeleton.setSkinByName("{skin_name}");
+        skeleton.setSlotsToSetupPose();
         var stateData = new spine.AnimationStateData(skeleton.data);
         stateData.defaultMix = 0.2;
-        stateData.setMix("roll", "run", 0);
-        stateData.setMix("jump", "run2", 0);
         state = new spine.AnimationState(stateData);
-        setupAnimations(state);
+        updateBounds();
+        playSelected();
         state.apply(skeleton);
         skeleton.updateWorldTransform(spine.Physics.update);
-        skeleton.getBounds(offset, bounds, []);
     }}
 
-    function setupAnimations(state) {{
-        state.addAnimation(0, "idle", true, 1);
-        state.addAnimation(0, "walk", true, 2);
-        state.addAnimation(0, "run", true, 4);
-        state.addAnimation(0, "roll", false, 3);
-        state.addAnimation(0, "run", true, 0);
-        state.addAnimation(0, "run2", true, 1.5);
-        state.addAnimation(0, "jump", false, 3);
-        state.addAnimation(0, "run2", true, 0);
-        state.addAnimation(0, "run", true, 1);
-        state.addAnimation(0, "idle", true, 3);
-        state.addAnimation(0, "idleTired", true, 0.5);
-        state.addAnimation(0, "idle", true, 2);
-        state.addAnimation(0, "walk2", true, 1);
-        state.addAnimation(0, "block", true, 3);
-        state.addAnimation(0, "punch1", false, 1.5);
-        state.addAnimation(0, "block", true, 0);
-        state.addAnimation(0, "punch1", false, 1.5);
-        state.addAnimation(0, "punch2", false, 0);
-        state.addAnimation(0, "block", true, 0);
-        state.addAnimation(0, "hitBig", false, 1.5);
-        state.addAnimation(0, "floorIdle", true, 0);
-        state.addAnimation(0, "floorGetUp", false, 1.5);
-        state.addAnimation(0, "idle", true, 0);
-        state.addAnimation(0, "meleeSwing1-fullBody", false, 1.5);
-        state.addAnimation(0, "idle", true, 0);
-        state.addAnimation(0, "meleeSwing2-fullBody", false, 1.5);
-        state.addAnimation(0, "idle", true, 0);
-        state.addAnimation(0, "idleTired", true, 0.5);
-        state.addAnimation(0, "crouchIdle", true, 1.5);
-        state.addAnimation(0, "crouchWalk", true, 2);
-        state.addAnimation(0, "crouchIdle", true, 2.5).listener = {{
-            start: function (trackIndex) {{
-                setupAnimations(state);
-            }}
-        }};
-
-        state.setAnimation(1, "empty", false, 0);
-        state.setAnimation(1, "hideSword", false, 2);
-    }}
-
-    function swingSword() {{
-        state.setAnimation(5, (clickAnim++ % 2 == 0) ? "meleeSwing2" : "meleeSwing1", false, 0);
-    }}
-
-    document.getElementById("swing-sword").addEventListener("click", swingSword);
-    canvas.addEventListener("click", swingSword);
+    animSelect.addEventListener("change", playSelected);
+    loopCheckbox.addEventListener("change", playSelected);
 
     var loadingScreen = new spine.LoadingScreen(renderer);
 
@@ -566,10 +561,10 @@ button:hover {{
                 loadingComplete();
             }}
 
-            renderer.camera.position.x = offset.x + bounds.x * 1.5 - 125;
+            renderer.camera.position.x = offset.x + bounds.x / 2;
             renderer.camera.position.y = offset.y + bounds.y / 2;
-            renderer.camera.viewportWidth = bounds.x * 3;
-            renderer.camera.viewportHeight = bounds.y * 1.2;
+            renderer.camera.viewportWidth = bounds.x * 1.4;
+            renderer.camera.viewportHeight = bounds.y * 1.4;
             renderer.resize(spine.ResizeMode.Fit);
 
             gl.clearColor(bgColor.r, bgColor.g, bgColor.b, bgColor.a);
@@ -666,7 +661,7 @@ def extract_skin(
 
     # Step 8: Generate viewer
     print("Generating viewer.html")
-    generate_viewer_html(output_dir, skin_name, skin_name_lower)
+    generate_viewer_html(output_dir, skin_name, skin_name_lower, skeleton_json)
 
     # Step 9: Verify
     print("\nVerifying output...")
