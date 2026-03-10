@@ -196,6 +196,7 @@ def extract_skeleton_json(
 
     # Inject A-pose animation
     result["animations"]["a-pose"] = _make_a_pose_animation()
+    result["animations"]["exploded-a-pose"] = _make_exploded_a_pose_animation()
 
     return result
 
@@ -221,6 +222,19 @@ def _make_a_pose_animation() -> dict:
             "foot_near":      {"rotate": [{"value": 14.12}]},
         }
     }
+
+
+def _make_exploded_a_pose_animation(gap: float = 120) -> dict:
+    """Create an exploded A-pose with air gaps between every body part."""
+    anim = _make_a_pose_animation()
+    # Add translate gaps to all existing bones (arms, legs, feet, hands)
+    for bone_name in anim["bones"]:
+        anim["bones"][bone_name]["translate"] = [{"x": gap}]
+    # Add translate-only entries for bones not in A-pose rotations
+    anim["bones"]["neck"] = {"translate": [{"x": gap}]}
+    anim["bones"]["head"] = {"translate": [{"x": gap}]}
+    anim["bones"]["waist"] = {"translate": [{"x": gap}]}
+    return anim
 
 
 # ---------------------------------------------------------------------------
@@ -448,6 +462,31 @@ def verify_output(output_dir: str, skin_name_lower: str, skeleton_json: dict):
 
 
 # ---------------------------------------------------------------------------
+# Region-to-body-part mapping
+# ---------------------------------------------------------------------------
+
+def write_region_mapping(output_dir: str, skin_name_lower: str, skeleton_json: dict):
+    """Write a region-to-body-part mapping file."""
+    slots = skeleton_json.get("slots", [])
+    slot_to_bone = {s["name"]: s["bone"] for s in slots}
+    lines = []
+    for skin in skeleton_json["skins"]:
+        for slot_name, attachments in skin.get("attachments", {}).items():
+            bone = slot_to_bone.get(slot_name, slot_name)
+            for att_name, att_data in attachments.items():
+                region = att_data.get("name", att_name)
+                lines.append(f"{region}\t{bone}\t{slot_name}")
+    # Deduplicate and sort
+    lines = sorted(set(lines))
+    mapping_path = os.path.join(output_dir, f"{skin_name_lower}_region_mapping.txt")
+    with open(mapping_path, "w") as f:
+        f.write("# region_name\tbody_part(bone)\tslot\n")
+        for line in lines:
+            f.write(line + "\n")
+    return mapping_path
+
+
+# ---------------------------------------------------------------------------
 # Viewer HTML generator
 # ---------------------------------------------------------------------------
 
@@ -543,7 +582,12 @@ label {{
     var loaded = false;
 
     function updateBounds() {{
+        // Apply first frame of current animation to get accurate bounds
         skeleton.setToSetupPose();
+        if (state) {{
+            state.update(0);
+            state.apply(skeleton);
+        }}
         skeleton.updateWorldTransform(spine.Physics.update);
         skeleton.getBounds(offset, bounds, []);
     }}
@@ -553,6 +597,7 @@ label {{
         var animName = animSelect.value;
         var loop = loopCheckbox.checked;
         state.setAnimation(0, animName, loop);
+        updateBounds();
     }}
 
     function loadingComplete() {{
@@ -589,8 +634,8 @@ label {{
 
             renderer.camera.position.x = offset.x + bounds.x / 2;
             renderer.camera.position.y = offset.y + bounds.y / 2;
-            renderer.camera.viewportWidth = bounds.x * 1.4;
-            renderer.camera.viewportHeight = bounds.y * 1.4;
+            renderer.camera.viewportWidth = bounds.x * 1.6;
+            renderer.camera.viewportHeight = bounds.y * 1.6;
             renderer.resize(spine.ResizeMode.Fit);
 
             gl.clearColor(bgColor.r, bgColor.g, bgColor.b, bgColor.a);
@@ -685,11 +730,15 @@ def extract_skin(
     with open(out_json, "w") as f:
         json.dump(skeleton_json, f, separators=(",", ":"))
 
-    # Step 8: Generate viewer
+    # Step 8: Write region mapping
+    mapping_path = write_region_mapping(output_dir, skin_name_lower, skeleton_json)
+    print(f"Writing region mapping -> {mapping_path}")
+
+    # Step 9: Generate viewer
     print("Generating viewer.html")
     generate_viewer_html(output_dir, skin_name, skin_name_lower, skeleton_json)
 
-    # Step 9: Verify
+    # Step 10: Verify
     print("\nVerifying output...")
     errors = verify_output(output_dir, skin_name_lower, skeleton_json)
     if errors:
@@ -704,10 +753,12 @@ def extract_skin(
     json_size = os.path.getsize(out_json)
     png_size = os.path.getsize(out_png)
     atlas_size = os.path.getsize(out_atlas)
+    mapping_size = os.path.getsize(mapping_path)
     print(f"\nOutput files in {output_dir}:")
     print(f"  {skin_name_lower}.json  ({json_size:,} bytes)")
     print(f"  {skin_name_lower}.png   ({canvas_w}x{canvas_h}, {png_size:,} bytes)")
     print(f"  {skin_name_lower}.atlas ({atlas_size:,} bytes)")
+    print(f"  {skin_name_lower}_region_mapping.txt ({mapping_size:,} bytes)")
     print(f"  viewer.html")
     return True
 
