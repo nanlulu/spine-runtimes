@@ -2,8 +2,6 @@ extracted_Assassin/
 preview/
 dummy/
 skins/
-color-block/
-extracted_color-block/
 extracted_color_block/
 extracted_Dummy/
 extracted_Dummy2/
@@ -13,3 +11,6 @@ assassin_atlas_regions.txt
 Beardy/
 gabriel/
 __pycache__/
+debug/
+color-block/spine-webgl.js
+color-block/assassin_backup.png
