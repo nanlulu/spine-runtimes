@@ -1,0 +1,90 @@
+assassin.png
+size:512,512
+filter:Linear,Linear
+pma:true
+scale:0.33
+sword_2_swing
+  bounds:2,2,109,211
+  offsets:72,33,253,288
+sword_3_bigSwing
+  bounds:113,2,203,197
+  offsets:57,34,333,289
+Assassin/Assassin_head_1
+  bounds:318,2,136,108
+  offsets:18,13,179,179
+Assassin/Assassin_head_2_injured
+  bounds:2,215,136,108
+  offsets:18,11,179,179
+Assassin/Assassin_torso
+  bounds:140,215,72,69
+  offsets:50,37,169,149
+  rotate:90
+Assassin/Assassin_leg_lower_near_1
+  bounds:211,215,37,63
+  offsets:17,22,64,107
+Assassin/Assassin_waist
+  bounds:250,215,46,49
+  offsets:25,12,93,71
+  rotate:90
+Assassin/Assassin_arm_lower_near
+  bounds:301,215,40,43
+  offsets:23,15,85,69
+Assassin/Assassin_arm_lower_far
+  bounds:343,215,39,43
+  offsets:22,13,85,69
+  rotate:90
+Assassin/Assassin_leg_lower_near_2
+  bounds:388,215,38,63
+  offsets:16,23,64,107
+  rotate:90
+Assassin/Assassin_leg_lower_far
+  bounds:2,325,37,63
+  offsets:17,22,64,107
+  rotate:90
+Assassin/Assassin_foot_far_2_bent
+  bounds:67,325,56,36
+  offsets:21,13,101,64
+Assassin/Assassin_foot_near_2_bent
+  bounds:125,325,56,36
+  offsets:21,14,101,64
+Assassin/Assassin_hand_far_1_fistBack
+  bounds:183,325,35,35
+  offsets:16,8,67,53
+Assassin/Assassin_hand_near_1_fistBack
+  bounds:220,325,36,34
+  offsets:17,7,67,53
+Assassin/Assassin_hand_far_2_fistPalm
+  bounds:258,325,36,33
+  offsets:16,9,67,53
+Assassin/Assassin_hand_near_2_fistPalm
+  bounds:296,325,36,33
+  offsets:15,11,67,53
+Assassin/Assassin_arm_upper_near
+  bounds:334,325,32,60
+  offsets:32,16,99,93
+  rotate:90
+Assassin/Assassin_arm_upper_far
+  bounds:396,325,31,60
+  offsets:33,16,99,93
+  rotate:90
+Assassin/Assassin_foot_far_1
+  bounds:2,364,63,28
+  offsets:24,14,107,58
+Assassin/Assassin_foot_near_1
+  bounds:67,364,62,28
+  offsets:25,14,107,58
+Assassin/Assassin_leg_upper_near
+  bounds:131,364,26,49
+  offsets:16,17,58,89
+  rotate:90
+Assassin/Assassin_leg_upper_far
+  bounds:182,364,25,49
+  offsets:17,17,58,89
+  rotate:90
+sword_1
+  bounds:233,364,25,207
+  offsets:72,34,168,289
+  rotate:90
+Assassin/Assassin_neck
+  bounds:442,364,21,20
+  offsets:11,8,43,36

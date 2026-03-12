@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Assassin - Extracted Skin Viewer</title>
+<style>
+body {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    background: #ebeef4;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+canvas {
+    width: 640px;
+    height: 480px;
+    border: 1px solid #ccc;
+}
+.controls {
+    margin-top: 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+select, label {
+    font-size: 14px;
+}
+select {
+    padding: 6px 10px;
+    border: 1px solid #999;
+    border-radius: 4px;
+    background: #fff;
+    cursor: pointer;
+}
+label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+}
+</style>
+<script src="spine-webgl.js"></script>
+</head>
+<body>
+
+<canvas id="canvas" width="640" height="480"></canvas>
+<div class="controls">
+    <select id="animation-select">
+<option value="block">block</option>
+<option value="crouchIdle">crouchIdle</option>
+<option value="crouchWalk">crouchWalk</option>
+<option value="empty">empty</option>
+<option value="floorGetUp">floorGetUp</option>
+<option value="floorIdle">floorIdle</option>
+<option value="hideSword">hideSword</option>
+<option value="hitBig">hitBig</option>
+<option value="idle" selected>idle</option>
+<option value="idleTired">idleTired</option>
+<option value="jump">jump</option>
+<option value="meleeSwing1">meleeSwing1</option>
+<option value="meleeSwing2">meleeSwing2</option>
+<option value="meleeSwing1-fullBody">meleeSwing1-fullBody</option>
+<option value="meleeSwing2-fullBody">meleeSwing2-fullBody</option>
+<option value="punch1">punch1</option>
+<option value="punch2">punch2</option>
+<option value="roll">roll</option>
+<option value="run">run</option>
+<option value="run2">run2</option>
+<option value="walk">walk</option>
+<option value="walk2">walk2</option>
+<option value="a-pose">a-pose</option>
+<option value="exploded-a-pose">exploded-a-pose</option>
+    </select>
+    <label><input type="checkbox" id="loop-checkbox" checked> Loop</label>
+</div>
+
+<script>
+(function () {
+    var canvas = document.getElementById("canvas");
+    var animSelect = document.getElementById("animation-select");
+    var loopCheckbox = document.getElementById("loop-checkbox");
+    var gl, renderer, assetManager, skeleton, state;
+    var timeKeeper = new spine.TimeKeeper();
+    var bgColor = new spine.Color(235 / 255, 239 / 255, 244 / 255, 1);
+    var offset = new spine.Vector2();
+    var bounds = new spine.Vector2();
+
+    var context = new spine.ManagedWebGLRenderingContext(canvas, { alpha: false });
+    gl = context.gl;
+    renderer = new spine.SceneRenderer(canvas, gl);
+    assetManager = new spine.AssetManager(gl, "", new spine.Downloader());
+    assetManager.loadTextureAtlas("assassin.atlas");
+    assetManager.loadJson("assassin.json");
+
+    var loaded = false;
+
+    function updateBounds() {
+        // Apply first frame of current animation to get accurate bounds
+        skeleton.setToSetupPose();
+        if (state) {
+            state.update(0);
+            state.apply(skeleton);
+        }
+        skeleton.updateWorldTransform(spine.Physics.update);
+        skeleton.getBounds(offset, bounds, []);
+    }
+
+    function playSelected() {
+        if (!state) return;
+        var animName = animSelect.value;
+        var loop = loopCheckbox.checked;
+        state.setAnimation(0, animName, loop);
+        updateBounds();
+    }
+
+    function loadingComplete() {
+        var atlasLoader = new spine.AtlasAttachmentLoader(assetManager.get("assassin.atlas"));
+        var skeletonJson = new spine.SkeletonJson(atlasLoader);
+        var skeletonData = skeletonJson.readSkeletonData(assetManager.get("assassin.json"));
+        skeleton = new spine.Skeleton(skeletonData);
+        skeleton.setSkinByName("Assassin");
+        skeleton.setSlotsToSetupPose();
+        var stateData = new spine.AnimationStateData(skeleton.data);
+        stateData.defaultMix = 0.2;
+        state = new spine.AnimationState(stateData);
+        updateBounds();
+        playSelected();
+        state.apply(skeleton);
+        skeleton.updateWorldTransform(spine.Physics.update);
+    }
+
+    animSelect.addEventListener("change", playSelected);
+    loopCheckbox.addEventListener("change", playSelected);
+
+    var loadingScreen = new spine.LoadingScreen(renderer);
+
+    function loop() {
+        requestAnimationFrame(loop);
+        timeKeeper.update();
+
+        var complete = assetManager.isLoadingComplete();
+        if (complete) {
+            if (!loaded) {
+                loaded = true;
+                loadingComplete();
+            }
+
+            renderer.camera.position.x = offset.x + bounds.x / 2;
+            renderer.camera.position.y = offset.y + bounds.y / 2;
+            renderer.camera.viewportWidth = bounds.x * 1.6;
+            renderer.camera.viewportHeight = bounds.y * 1.6;
+            renderer.resize(spine.ResizeMode.Fit);
+
+            gl.clearColor(bgColor.r, bgColor.g, bgColor.b, bgColor.a);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+
+            state.update(timeKeeper.delta);
+            state.apply(skeleton);
+            skeleton.updateWorldTransform(spine.Physics.update);
+
+            renderer.begin();
+            renderer.drawSkeleton(skeleton, true);
+            renderer.end();
+        }
+        loadingScreen.draw(complete);
+    }
+
+    requestAnimationFrame(loop);
+})();
+</script>
+
+</body>
+</html>
