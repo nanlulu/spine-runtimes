@@ -115,18 +115,46 @@ def find_blobs(rgba: Image.Image, min_pixels: int = 100):
 # Part orientation correction (improved from panda_to_skin)
 # ---------------------------------------------------------------------------
 
-EXPECTED_ORIENTATION = {
-    "arm_upper": "horizontal",
-    "arm_lower": "horizontal",
-    "hand": None,
-    "leg_upper": "horizontal",
-    "leg_lower": "vertical",
-    "foot": None,
-    "head": None,
-    "torso": None,
-    "waist": None,
-    "neck": None,
+def load_orientation_map(path: str) -> dict:
+    """Load orientation map from a TSV text file.
+
+    Returns a dict keyed by part name, with values containing
+    pca_angle, aspect_ratio, wider_than_tall.
+    """
+    omap = {}
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split("\t")
+            if len(parts) < 4:
+                continue
+            name = parts[0]
+            omap[name] = {
+                "pca_angle": float(parts[1]),
+                "aspect_ratio": float(parts[2]),
+                "wider_than_tall": parts[3] == "true",
+            }
+    return omap
+
+
+# Mapping from Assassin-specific hand region names to Dummy region names
+_HAND_FALLBACK = {
+    "hand_near_1_fistBack": "hand_1_fistBack",
+    "hand_near_2_fistPalm": "hand_2_fistPalm",
+    "hand_far_1_fistBack": "hand_1_fistBack",
+    "hand_far_2_fistPalm": "hand_2_fistPalm",
 }
+
+
+def _lookup_orientation(region_suffix: str, orientation_map: dict) -> dict | None:
+    """Look up a region suffix in the orientation map, with fallbacks."""
+    if region_suffix in orientation_map:
+        return orientation_map[region_suffix]
+    if region_suffix in _HAND_FALLBACK:
+        return orientation_map.get(_HAND_FALLBACK[region_suffix])
+    return None
 
 
 def get_blob_angle(img: Image.Image) -> float:
@@ -163,50 +191,49 @@ def _crop_tight(img: Image.Image) -> Image.Image:
     return img.crop((x0, y0, x1, y1))
 
 
-def orient_part(img: Image.Image, part_name: str) -> Image.Image:
-    """Rotate a body part image to match the expected bone-local orientation.
+def orient_part(img: Image.Image, region_suffix: str, orientation_map: dict,
+                region: AtlasRegion = None) -> Image.Image:
+    """Rotate a body part image to match the reference orientation from the dummy atlas.
 
-    Includes post-rotation aspect ratio guard to handle PCA ambiguity on
-    nearly-square blobs.
+    Strategy:
+    - For nearly-square reference parts (head, waist, neck), skip entirely.
+    - Check if a 90° rotation would make the part better fill the target region.
+      If so, rotate 90°. Otherwise keep as-is to avoid unnecessary distortion.
     """
-    category = None
-    for cat in EXPECTED_ORIENTATION:
-        if part_name.startswith(cat) or part_name == cat:
-            category = cat
-            break
-
-    if category is None or EXPECTED_ORIENTATION[category] is None:
+    ref = _lookup_orientation(region_suffix, orientation_map)
+    if ref is None:
         return img
 
-    expected = EXPECTED_ORIENTATION[category]
-    current_angle = get_blob_angle(img)
+    target_ar = ref["aspect_ratio"]
 
-    if expected == "horizontal":
-        rotation = -current_angle
-    elif expected == "vertical":
-        if current_angle > 0:
-            rotation = 90 - current_angle
-        else:
-            rotation = -90 - current_angle
-
-    if abs(rotation) < 5:
+    # For nearly-square reference parts (head, waist, neck), skip entirely
+    if abs(target_ar - 1.0) < 0.15:
         return img
 
-    rotated = img.rotate(rotation, resample=Image.BICUBIC, expand=True)
-    cropped = _crop_tight(rotated)
+    target_wider = ref["wider_than_tall"]
+    w, h = img.size
 
-    # Post-rotation aspect ratio guard: verify the result matches expectation
-    w, h = cropped.size
-    if expected == "horizontal" and h > w:
-        # Should be wider than tall but isn't — rotate 90°
-        cropped = cropped.rotate(90, resample=Image.BICUBIC, expand=True)
-        cropped = _crop_tight(cropped)
-    elif expected == "vertical" and w > h:
-        # Should be taller than wide but isn't — rotate 90°
-        cropped = cropped.rotate(90, resample=Image.BICUBIC, expand=True)
-        cropped = _crop_tight(cropped)
+    # Check if rotating 90° would better fill the target region.
+    # Compare how well the current vs rotated aspect ratio matches the region.
+    if region is not None:
+        region_ar = region.width / region.height if region.height > 0 else 1.0
+        current_ar = w / h if h > 0 else 1.0
+        rotated_ar = h / w if w > 0 else 1.0
+        # Pick whichever is closer to the region's aspect ratio
+        current_match = abs(math.log(current_ar / region_ar)) if region_ar > 0 and current_ar > 0 else 999
+        rotated_match = abs(math.log(rotated_ar / region_ar)) if region_ar > 0 and rotated_ar > 0 else 999
 
-    return cropped
+        if rotated_match < current_match - 0.1:  # margin to avoid unnecessary rotation
+            result = img.rotate(90, resample=Image.BICUBIC, expand=True)
+            return _crop_tight(result)
+
+    # Fallback: if no region provided, use wider_than_tall check
+    is_wider = w > h
+    if is_wider != target_wider:
+        result = img.rotate(90, resample=Image.BICUBIC, expand=True)
+        return _crop_tight(result)
+
+    return img
 
 
 # ---------------------------------------------------------------------------
@@ -357,7 +384,12 @@ REGION_TO_PART = {
 # ---------------------------------------------------------------------------
 
 def fit_to_region(img: Image.Image, region: AtlasRegion) -> Image.Image:
-    """Resize img to fit atlas region bounds, apply rotation and PMA."""
+    """Resize img to fit atlas region bounds, apply rotation and PMA.
+
+    Uses a balanced scaling strategy: scales between FIT and FILL using their
+    geometric mean, then center-crops to the target size. This keeps most of
+    the part visible while still filling the region reasonably well.
+    """
     target_w = region.width
     target_h = region.height
 
@@ -365,17 +397,23 @@ def fit_to_region(img: Image.Image, region: AtlasRegion) -> Image.Image:
     if src_w == 0 or src_h == 0:
         return Image.new("RGBA", (target_w, target_h), (0, 0, 0, 0))
 
-    # Scale to FILL the region (may overflow), then center-crop
-    scale = max(target_w / src_w, target_h / src_h)
+    fit_scale = min(target_w / src_w, target_h / src_h)
+    fill_scale = max(target_w / src_w, target_h / src_h)
+
+    # Use geometric mean of FIT and FILL for a balanced result
+    scale = math.sqrt(fit_scale * fill_scale)
     new_w = max(1, int(src_w * scale))
     new_h = max(1, int(src_h * scale))
 
     resized = img.resize((new_w, new_h), Image.LANCZOS)
 
-    # Center-crop to target size
-    crop_x = (new_w - target_w) // 2
-    crop_y = (new_h - target_h) // 2
-    canvas = resized.crop((crop_x, crop_y, crop_x + target_w, crop_y + target_h))
+    # Center-crop to target size (may clip slightly on the overflow axis)
+    canvas = Image.new("RGBA", (target_w, target_h), (0, 0, 0, 0))
+    paste_x = (target_w - new_w) // 2
+    paste_y = (target_h - new_h) // 2
+    canvas.paste(resized, (paste_x, paste_y))
+    # Crop canvas to exact target size (handles overflow)
+    canvas = canvas.crop((0, 0, target_w, target_h))
 
     if region.rotate == 90:
         canvas = canvas.transpose(Image.ROTATE_270)
@@ -399,6 +437,8 @@ def main():
     parser.add_argument("--output", type=str, default="color-block-rabbit/assassin.png", help="Output atlas PNG")
     parser.add_argument("--atlas", type=str, default="color-block-rabbit/assassin.atlas", help="Atlas file")
     parser.add_argument("--tolerance", type=int, default=40, help="Background flood-fill color tolerance")
+    parser.add_argument("--orientation-map", type=str, default="dummy/orientation_map.txt",
+                        help="Orientation map file (from extract_orientation_map.py)")
     parser.add_argument("--debug", action="store_true", help="Save debug images")
     args = parser.parse_args()
 
@@ -406,6 +446,12 @@ def main():
     input_path = script_dir / args.input
     output_path = script_dir / args.output
     atlas_path = script_dir / args.atlas
+    omap_path = script_dir / args.orientation_map
+
+    # Load orientation map
+    print(f"Loading orientation map: {omap_path}")
+    orientation_map = load_orientation_map(str(omap_path))
+    print(f"  Loaded {len(orientation_map)} entries")
 
     # Step 1: Load and remove background
     print(f"Loading {input_path}...")
@@ -439,19 +485,6 @@ def main():
         for name, crop in body_parts.items():
             crop.save(debug_dir / f"03_part_{name}.png")
 
-    # Step 3b: Orient parts to match bone-local expected orientation
-    print("Orienting parts...")
-    for name in list(body_parts.keys()):
-        original = body_parts[name]
-        oriented = orient_part(original, name)
-        if oriented is not original:
-            print(f"  Rotated {name}: {original.size} -> {oriented.size}")
-            body_parts[name] = oriented
-
-    if args.debug:
-        for name, crop in body_parts.items():
-            crop.save(debug_dir / f"03b_oriented_{name}.png")
-
     # Step 4: Parse atlas and composite
     print(f"Parsing atlas: {atlas_path}")
     pages, atlas_regions = parse_atlas(str(atlas_path))
@@ -475,6 +508,7 @@ def main():
 
     mapped = 0
     unmapped = []
+    print("Orienting and compositing parts...")
     for region_suffix, region in skin_regions.items():
         part_key = REGION_TO_PART.get(region_suffix)
         if part_key is None or part_key not in body_parts:
@@ -482,7 +516,16 @@ def main():
             continue
 
         part_img = body_parts[part_key]
-        fitted = fit_to_region(part_img, region)
+
+        # Orient per-region using the orientation map and target region dimensions
+        oriented = orient_part(part_img, region_suffix, orientation_map, region=region)
+        if oriented is not part_img:
+            print(f"  Oriented {region_suffix}: {part_img.size} -> {oriented.size}")
+
+        if args.debug:
+            oriented.save(debug_dir / f"03b_oriented_{region_suffix}.png")
+
+        fitted = fit_to_region(oriented, region)
 
         phys_w = region.height if region.rotate == 90 else region.width
         phys_h = region.width if region.rotate == 90 else region.height
